@@ -5,7 +5,7 @@
 
 import numpy as np
 from torchvision import datasets, transforms
-
+from torch.utils.data import Subset
 def mnist_iid(dataset, num_users):
     """
     Sample I.I.D. client data from MNIST dataset
@@ -32,7 +32,7 @@ def mnist_noniid(dataset, num_users):
     idx_shard = [i for i in range(num_shards)]
     dict_users = {i: np.array([], dtype='int64') for i in range(num_users)}
     idxs = np.arange(num_shards*num_imgs)
-    labels = dataset.train_labels.numpy()
+    labels = dataset.targets.numpy()
 
     # sort labels
     idxs_labels = np.vstack((idxs, labels))
@@ -62,6 +62,14 @@ def cifar_iid(dataset, num_users):
         all_idxs = list(set(all_idxs) - dict_users[i])
     return dict_users
 
+
+def mnist_split(dataset, num_users, local_dataset_size):
+    dict_users, all_idxs = {}, [i for i in range(len(dataset))]
+    for i in range(num_users):
+        user_idxs = set(np.random.choice(all_idxs, local_dataset_size, replace=False))
+        all_idxs = list(set(all_idxs) - user_idxs)
+        dict_users[i] = Subset(dataset, user_idxs)
+    return dict_users
 
 if __name__ == '__main__':
     dataset_train = datasets.MNIST('../data/mnist/', train=True, download=True,

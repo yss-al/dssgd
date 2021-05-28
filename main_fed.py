@@ -13,10 +13,10 @@ import torch
 from utils.sampling import mnist_iid, mnist_noniid, cifar_iid
 from utils.options import args_parser
 from models.Update import LocalUpdate
-from models.Nets import MLP, CNNMnist, CNNCifar
+from models.Nets import MLP, MLPMnist, CNNMnist, CNNCifar
 from models.Fed import FedAvg
 from models.test import test_img
-
+import torchvision
 
 if __name__ == '__main__':
     # parse args
@@ -35,8 +35,8 @@ if __name__ == '__main__':
             dict_users = mnist_noniid(dataset_train, args.num_users)
     elif args.dataset == 'cifar':
         trans_cifar = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        dataset_train = datasets.CIFAR10('../data/cifar', train=True, download=True, transform=trans_cifar)
-        dataset_test = datasets.CIFAR10('../data/cifar', train=False, download=True, transform=trans_cifar)
+        dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar)
+        dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar)
         if args.iid:
             dict_users = cifar_iid(dataset_train, args.num_users)
         else:
@@ -54,7 +54,8 @@ if __name__ == '__main__':
         len_in = 1
         for x in img_size:
             len_in *= x
-        net_glob = MLP(dim_in=len_in, dim_hidden=200, dim_out=args.num_classes).to(args.device)
+        # net_glob = MLP(dim_in=len_in, dim_hidden=200, dim_out=args.num_classes).to(args.device)
+        net_glob = MLPMnist(dim_in=len_in).to(args.device)
     else:
         exit('Error: unrecognized model')
     print(net_glob)

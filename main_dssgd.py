@@ -3,8 +3,8 @@
 # Python version: 3.6
 
 import matplotlib
-
 import matplotlib.pyplot as plt
+import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -13,9 +13,8 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 
 from utils.options import args_parser
-from models.Nets import MLP, MLPMnist, CNNMnist, CNNCifar
-
-matplotlib.use('Agg')
+from utils.sampling import mnist_split
+from models.MLPMnist import MLPMnist
 
 
 def test(net_g, data_loader):
@@ -49,32 +48,21 @@ if __name__ == '__main__':
     # load dataset and split users
     if args.dataset == 'mnist':
         dataset_train = datasets.MNIST('./data/mnist/', train=True, download=True,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),
-                       transforms.Normalize((0.1307,), (0.3081,))
-                   ]))
-        img_size = dataset_train[0][0].shape
-    elif args.dataset == 'cifar':
-        transform = transforms.Compose(
-            [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        dataset_train = datasets.CIFAR10('./data/cifar', train=True, transform=transform, target_transform=None,
-                                         download=True)
-        img_size = dataset_train[0][0].shape
+                                       transform=transforms.Compose([
+                                           transforms.ToTensor(),
+                                           transforms.Normalize((0.1307,), (0.3081,))
+                                       ]))
+        dict_users = mnist_split(dataset_train, args.num_users, args.local_dataset_size)
     else:
         exit('Error: unrecognized dataset')
 
     # build model
-    if args.model == 'cnn' and args.dataset == 'cifar':
-        net_glob = CNNCifar(args=args).to(args.device)
-    elif args.model == 'cnn' and args.dataset == 'mnist':
-        net_glob = CNNMnist(args=args).to(args.device)
-    elif args.model == 'mlp':
+    img_size = dataset_train[0][0].shape
+    if args.model == 'mlp':
         len_in = 1
         for x in img_size:
             len_in *= x
-        net_glob = MLPMnist(dim_in=len_in).to(args.device)
-        # net_glob = MLP(dim_in=len_in, dim_hidden=200, dim_out=args.num_classes).to(args.device)
+        net_glob = MLPMnist(dim_in=len_in, dim_out=args.num_classes).to(args.device)
     else:
         exit('Error: unrecognized model')
     print(net_glob)
@@ -85,38 +73,32 @@ if __name__ == '__main__':
 
     list_loss = []
     net_glob.train()
+    w_glob = net_glob.parameters_to_list()
+    # initialize local net
+    local_nets = []
+    for i in range(0, args.num_users):
+        local_nets.append(MLPMnist(dim_in=len_in, dim_out=args.num_classes).to(args.device))
     for epoch in range(args.epochs):
-        batch_loss = []
-        for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.to(args.device), target.to(args.device)
-            optimizer.zero_grad()
-            output = net_glob(data)
-            loss = F.cross_entropy(output, target)
-            loss.backward()
-            optimizer.step()
-            if batch_idx % 50 == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx * len(data), len(train_loader.dataset),
-                           100. * batch_idx / len(train_loader), loss.item()))
-            batch_loss.append(loss.item())
-        loss_avg = sum(batch_loss) / len(batch_loss)
-        print('\nTrain loss:', loss_avg)
-        list_loss.append(loss_avg)
+        for idx in range(0, len(local_nets)):
+            local_nets[idx].download(w_glob)
 
+            local_nets[idx].upload_paras()
+
+    exit(0)
     # plot loss
     plt.figure()
     plt.plot(range(len(list_loss)), list_loss)
     plt.xlabel('epochs')
     plt.ylabel('train loss')
-    plt.savefig('./log/nn_{}_{}_{}.png'.format(args.dataset, args.model, args.epochs))
+    plt.savefig('./save/nn_{}_{}_{}.png'.format(args.dataset, args.model, args.epochs))
 
     # testing
     if args.dataset == 'mnist':
         dataset_test = datasets.MNIST('./data/mnist/', train=False, download=True,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),
-                       transforms.Normalize((0.1307,), (0.3081,))
-                   ]))
+                                      transform=transforms.Compose([
+                                          transforms.ToTensor(),
+                                          transforms.Normalize((0.1307,), (0.3081,))
+                                      ]))
         test_loader = DataLoader(dataset_test, batch_size=1000, shuffle=False)
     elif args.dataset == 'cifar':
         transform = transforms.Compose(
@@ -130,3 +112,4 @@ if __name__ == '__main__':
 
     print('test on', len(dataset_test), 'samples')
     test_acc, test_loss = test(net_glob, test_loader)
+    plt.show()
