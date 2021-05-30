@@ -14,7 +14,7 @@ from utils.sampling import mnist_iid, mnist_noniid, cifar_iid
 from utils.options import args_parser
 from models.Update import LocalUpdate
 from models.Nets import MLP, CNNMnist, CNNCifar
-from models.Fed import FedAvg
+from models.Fed import FedAvg, DSSGD
 from models.test import test_img
 import torchvision
 
@@ -76,23 +76,23 @@ if __name__ == '__main__':
         w_locals = [w_glob for i in range(args.num_users)]
     for iter in range(args.epochs):
         loss_locals = []
-        if not args.all_clients:
-            w_locals = []
+        # if not args.all_clients:
+            # w_locals = []
         m = max(int(args.frac * args.num_users), 1)
         idxs_users = np.random.choice(range(args.num_users), m, replace=False)
+        idxs_users = range(args.num_users)
         for idx in idxs_users:
             local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_users[idx])
             w, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
-            if args.all_clients:
-                w_locals[idx] = copy.deepcopy(w)
-            else:
-                w_locals.append(copy.deepcopy(w))
+            # if args.all_clients:
+                # w_locals[idx] = copy.deepcopy(w)
+            # else:
+                # w_locals.append(copy.deepcopy(w))
             loss_locals.append(copy.deepcopy(loss))
-        # update global weights
-        w_glob = FedAvg(w_locals)
-
-        # copy weight to net_glob
-        net_glob.load_state_dict(w_glob)
+            # upload local weights
+            w_glob = DSSGD(w, w_glob, theta_upload=1.)
+            # copy weight to net_glob
+            net_glob.load_state_dict(w_glob)
 
         # print loss
         loss_avg = sum(loss_locals) / len(loss_locals)

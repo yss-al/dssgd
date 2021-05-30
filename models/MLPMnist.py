@@ -22,10 +22,10 @@ class MLPMnist(nn.Module):
         start = 0
         for k, v in self.state_dict().items():
             w_dict[k] = w_list[start:start + v.nelement()].view(v.size())
-            print(f'{k}: {v.nelement()}')
-            print(w_dict[k].size())
+            # print(f'{k}: {v.nelement()}')
+            # print(w_dict[k].size())
             start += v.nelement()
-            print(start)
+            # print(start)
         self.load_state_dict(w_dict)
 
 
@@ -33,10 +33,10 @@ class MLPMnist(nn.Module):
         print('one epoch')
         pass
 
-    def upload_paras(self, theta=0.1):
-        grad_list = [p.grad for p in self.parameters()]
+    def upload_grads(self, theta=1):
+        grad_list = [p.grad.flatten() for p in self.parameters()]
         grad_glob = torch.cat(grad_list)
-        _, indexes = torch.topk(len(grad_glob) * theta)
+        _, indexes = torch.topk(grad_glob, int(len(grad_glob) * theta))
         grad_zero = torch.zeros_like(grad_glob)
         grad_zero[indexes] = 1.
         return grad_zero * grad_glob

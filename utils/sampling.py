@@ -6,6 +6,10 @@
 import numpy as np
 from torchvision import datasets, transforms
 from torch.utils.data import Subset
+from torch.utils.data import DataLoader
+
+
+
 def mnist_iid(dataset, num_users):
     """
     Sample I.I.D. client data from MNIST dataset
@@ -68,11 +72,11 @@ def mnist_split(dataset, num_users, local_dataset_size):
     for i in range(num_users):
         user_idxs = set(np.random.choice(all_idxs, local_dataset_size, replace=False))
         all_idxs = list(set(all_idxs) - user_idxs)
-        dict_users[i] = Subset(dataset, user_idxs)
+        dict_users[i] = iter(DataLoader(Subset(dataset, list(user_idxs)), batch_size=1, shuffle=False))
     return dict_users
 
 if __name__ == '__main__':
-    dataset_train = datasets.MNIST('../data/mnist/', train=True, download=True,
+    dataset_train = datasets.MNIST('./data/mnist/', train=True, download=True,
                                    transform=transforms.Compose([
                                        transforms.ToTensor(),
                                        transforms.Normalize((0.1307,), (0.3081,))

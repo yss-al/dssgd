@@ -76,14 +76,23 @@ if __name__ == '__main__':
     w_glob = net_glob.parameters_to_list()
     # initialize local net
     local_nets = []
+    optim_nets = []
+    criterion = torch.nn.CrossEntropyLoss()
+    lr = 1e-1
     for i in range(0, args.num_users):
         local_nets.append(MLPMnist(dim_in=len_in, dim_out=args.num_classes).to(args.device))
     for epoch in range(args.epochs):
         for idx in range(0, len(local_nets)):
             local_nets[idx].download(w_glob)
-
-            local_nets[idx].upload_paras()
-
+            optim = torch.optim.Optimizer(local_nets[idx].parameters(), {})
+            optim.zero_grad()
+            image, label = next(dict_users[idx])
+            y = local_nets[idx].forward(image)
+            loss = criterion(y, label)
+            loss.backward()
+            local_grads = local_nets[idx].upload_grads()
+            w_glob = w_glob - lr * local_grads
+        print('Train Loss: {}'.format(loss))
     exit(0)
     # plot loss
     plt.figure()
