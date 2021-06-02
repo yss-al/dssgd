@@ -3,62 +3,57 @@
 # Python version: 3.6
 
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import copy
 import numpy as np
-
-import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-import torch.optim as optim
 from torchvision import datasets, transforms
+import torch
 
+from utils.sampling import mnist_iid, mnist_noniid, cifar_iid
 from utils.options import args_parser
-from utils.sampling import mnist_split
+from models.Update import LocalUpdate
+from models.Nets import MLP, CNNMnist, CNNCifar
 from models.MLPMnist import MLPMnist
-
-
-def test(net_g, data_loader):
-    # testing
-    net_g.eval()
-    test_loss = 0
-    correct = 0
-    l = len(data_loader)
-    for idx, (data, target) in enumerate(data_loader):
-        data, target = data.to(args.device), target.to(args.device)
-        log_probs = net_g(data)
-        test_loss += F.cross_entropy(log_probs, target).item()
-        y_pred = log_probs.data.max(1, keepdim=True)[1]
-        correct += y_pred.eq(target.data.view_as(y_pred)).long().cpu().sum()
-
-    test_loss /= len(data_loader.dataset)
-    print('\nTest set: Average loss: {:.4f} \nAccuracy: {}/{} ({:.2f}%)\n'.format(
-        test_loss, correct, len(data_loader.dataset),
-        100. * correct / len(data_loader.dataset)))
-
-    return correct, test_loss
-
+from models.Fed import DSSGD
+from models.test import test_img
+import torchvision
 
 if __name__ == '__main__':
     # parse args
     args = args_parser()
     args.device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() and args.gpu != -1 else 'cpu')
-
-    torch.manual_seed(args.seed)
+    print(args.device)
+    # torch.manual_seed(args.seed)
 
     # load dataset and split users
     if args.dataset == 'mnist':
-        dataset_train = datasets.MNIST('./data/mnist/', train=True, download=True,
-                                       transform=transforms.Compose([
-                                           transforms.ToTensor(),
-                                           transforms.Normalize((0.1307,), (0.3081,))
-                                       ]))
-        dict_users = mnist_split(dataset_train, args.num_users, args.local_dataset_size)
+        trans_mnist = transforms.Compose([transforms.ToTensor(), transforms.Resize((32, 32)), transforms.Normalize((0.1307,), (0.3081,))])
+        dataset_train = datasets.MNIST('./data/mnist/', train=True, download=True, transform=trans_mnist)
+        dataset_test = datasets.MNIST('./data/mnist/', train=False, download=True, transform=trans_mnist)
+        # sample users
+        if args.iid:
+            dict_users = mnist_iid(dataset_train, args.num_users)
+        else:
+            dict_users = mnist_noniid(dataset_train, args.num_users)
+    elif args.dataset == 'cifar':
+        trans_cifar = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar)
+        dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar)
+        if args.iid:
+            dict_users = cifar_iid(dataset_train, args.num_users)
+        else:
+            exit('Error: only consider IID setting in CIFAR10')
     else:
         exit('Error: unrecognized dataset')
+    img_size = dataset_train[0][0].shape
 
     # build model
-    img_size = dataset_train[0][0].shape
-    if args.model == 'mlp':
+    if args.model == 'cnn' and args.dataset == 'cifar':
+        net_glob = CNNCifar(args=args).to(args.device)
+    elif args.model == 'cnn' and args.dataset == 'mnist':
+        net_glob = CNNMnist(args=args).to(args.device)
+    elif args.model == 'mlp':
         len_in = 1
         for x in img_size:
             len_in *= x
@@ -66,59 +61,50 @@ if __name__ == '__main__':
     else:
         exit('Error: unrecognized model')
     print(net_glob)
+    net_glob.train()
+
+    # copy weights
+    w_glob = net_glob.state_dict()
 
     # training
-    optimizer = optim.SGD(net_glob.parameters(), lr=args.lr, momentum=args.momentum)
-    train_loader = DataLoader(dataset_train, batch_size=64, shuffle=True)
+    loss_train = []
+    cv_loss, cv_acc = [], []
+    val_loss_pre, counter = 0, 0
+    net_best = None
+    best_loss = None
+    val_acc_list, net_list = [], []
 
-    list_loss = []
-    net_glob.train()
-    w_glob = net_glob.parameters_to_list()
-    # initialize local net
-    local_nets = []
-    optim_nets = []
-    criterion = torch.nn.CrossEntropyLoss()
-    lr = 1e-1
-    for i in range(0, args.num_users):
-        local_nets.append(MLPMnist(dim_in=len_in, dim_out=args.num_classes).to(args.device))
-    for epoch in range(args.epochs):
-        for idx in range(0, len(local_nets)):
-            local_nets[idx].download(w_glob)
-            optim = torch.optim.Optimizer(local_nets[idx].parameters(), {})
-            optim.zero_grad()
-            image, label = next(dict_users[idx])
-            y = local_nets[idx].forward(image)
-            loss = criterion(y, label)
-            loss.backward()
-            local_grads = local_nets[idx].upload_grads()
-            w_glob = w_glob - lr * local_grads
-        print('Train Loss: {}'.format(loss))
-    exit(0)
-    # plot loss
+    if args.all_clients: 
+        print("Aggregation over all clients")
+        w_locals = [w_glob for i in range(args.num_users)]
+    for iter in range(args.epochs):
+        loss_locals = []
+        idxs_users = range(args.num_users)
+        for idx in idxs_users:
+            local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_users[idx])
+            w, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+            loss_locals.append(copy.deepcopy(loss))
+            # upload local weights
+            w_glob = DSSGD(w, w_glob, args.theta_upload)
+            # copy weight to net_glob
+            net_glob.load_state_dict(w_glob)
+
+        # print loss
+        loss_avg = sum(loss_locals) / len(loss_locals)
+        print('Round {:3d}, Average loss {:.3f}'.format(iter, loss_avg))
+        loss_train.append(loss_avg)
+        # acc_test, loss_test = test_img(net_glob, dataset_test, args)
+        # print("Testing accuracy: {:.2f}".format(acc_test))
+    # plot loss curve
     plt.figure()
-    plt.plot(range(len(list_loss)), list_loss)
-    plt.xlabel('epochs')
-    plt.ylabel('train loss')
-    plt.savefig('./save/nn_{}_{}_{}.png'.format(args.dataset, args.model, args.epochs))
+    plt.plot(range(len(loss_train)), loss_train)
+    plt.ylabel('train_loss')
+    plt.savefig('./save/fed_{}_{}_{}_C{}_iid{}.png'.format(args.dataset, args.model, args.epochs, args.theta_upload, args.iid))
 
     # testing
-    if args.dataset == 'mnist':
-        dataset_test = datasets.MNIST('./data/mnist/', train=False, download=True,
-                                      transform=transforms.Compose([
-                                          transforms.ToTensor(),
-                                          transforms.Normalize((0.1307,), (0.3081,))
-                                      ]))
-        test_loader = DataLoader(dataset_test, batch_size=1000, shuffle=False)
-    elif args.dataset == 'cifar':
-        transform = transforms.Compose(
-            [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        dataset_test = datasets.CIFAR10('./data/cifar', train=False, transform=transform, target_transform=None,
-                                        download=True)
-        test_loader = DataLoader(dataset_test, batch_size=1000, shuffle=False)
-    else:
-        exit('Error: unrecognized dataset')
+    net_glob.eval()
+    acc_train, loss_train = test_img(net_glob, dataset_train, args)
+    acc_test, loss_test = test_img(net_glob, dataset_test, args)
+    print("Training accuracy: {:.2f}".format(acc_train))
+    print("Testing accuracy: {:.2f}".format(acc_test))
 
-    print('test on', len(dataset_test), 'samples')
-    test_acc, test_loss = test(net_glob, test_loader)
-    plt.show()

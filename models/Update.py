@@ -5,9 +5,6 @@
 import torch
 from torch import nn, autograd
 from torch.utils.data import DataLoader, Dataset
-import numpy as np
-import random
-from sklearn import metrics
 
 
 class DatasetSplit(Dataset):
@@ -33,7 +30,8 @@ class LocalUpdate(object):
     def train(self, net):
         net.train()
         # train and update
-        optimizer = torch.optim.SGD(net.parameters(), lr=self.args.lr, momentum=self.args.momentum)
+        # optimizer = torch.optim.SGD(net.parameters(), lr=self.args.lr, momentum=self.args.momentum)
+        optimizer = torch.optim.Adagrad(net.parameters(), lr=self.args.lr, lr_decay=1e-7)
 
         epoch_loss = []
         for iter in range(self.args.local_ep):

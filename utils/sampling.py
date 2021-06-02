@@ -17,9 +17,9 @@ def mnist_iid(dataset, num_users):
     :param num_users:
     :return: dict of image index
     """
-    num_items = int(len(dataset)/num_users)
+    num_items = int(len(dataset)/1)
     dict_users, all_idxs = {}, [i for i in range(len(dataset))]
-    for i in range(num_users):
+    for i in range(1):
         dict_users[i] = set(np.random.choice(all_idxs, num_items, replace=False))
         all_idxs = list(set(all_idxs) - dict_users[i])
     return dict_users
@@ -40,8 +40,8 @@ def mnist_noniid(dataset, num_users):
 
     # sort labels
     idxs_labels = np.vstack((idxs, labels))
-    idxs_labels = idxs_labels[:,idxs_labels[1,:].argsort()]
-    idxs = idxs_labels[0,:]
+    idxs_labels = idxs_labels[:, idxs_labels[1, :].argsort()]
+    idxs = idxs_labels[0, :]
 
     # divide and assign
     for i in range(num_users):
