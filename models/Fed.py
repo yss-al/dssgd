@@ -4,7 +4,6 @@
 
 import copy
 import torch
-from torch import nn
 
 
 def FedAvg(w):
@@ -17,7 +16,6 @@ def FedAvg(w):
 
 
 def DSSGD(w, w_glob, theta_upload=0.1):
-    # return copy.deepcopy(w)
     w_row = torch.cat([v.flatten() for _, v in w.items()])
     w_glob_row = torch.cat([v.flatten() for _, v in w_glob.items()])
     delta_grad = w_glob_row - w_row
