@@ -8,15 +8,19 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 
-def test_img(net_g, datatest, args):
+def test_img(net_g, datatest, batch_size=128, gpu=-1, verbose=False, args=None):
+    if args is not None:
+        batch_size = args.bs
+        gpu = args.gpu
+        verbose = args.verbose
     net_g.eval()
     # testing
     test_loss = 0
     correct = 0
-    data_loader = DataLoader(datatest, batch_size=args.bs)
-    l = len(data_loader)
+    data_loader = DataLoader(datatest, batch_size=batch_size)
+
     for idx, (data, target) in enumerate(data_loader):
-        if args.gpu != -1:
+        if gpu != -1:
             data, target = data.cuda(), target.cuda()
         log_probs = net_g(data)
         # sum up batch loss
@@ -27,7 +31,7 @@ def test_img(net_g, datatest, args):
 
     test_loss /= len(data_loader.dataset)
     accuracy = 100.00 * correct / len(data_loader.dataset)
-    if args.verbose:
+    if verbose:
         print('\nTest set: Average loss: {:.4f} \nAccuracy: {}/{} ({:.2f}%)\n'.format(
             test_loss, correct, len(data_loader.dataset), accuracy))
     return accuracy, test_loss
